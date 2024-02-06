@@ -251,11 +251,18 @@ To start, I'll sort out 5 measurements for each plot, working backwards in time 
 # Make linkable tables for multiple measurements
 ################################################################################
 
-# make ending data, which will be used to find data from earlier measurements of the same subplots (but note that this can contain multiple measurements from the same subplot; for a plot that's been measured 4 times, we'll get four different 'records' in this table, three of which will have PREV_PLT_CN. Most or all of these multiples will be filtered out later when we remove plots with insufficient measurements, depending on how many measurements we decide to use.)
+# make ending data, which will be used to find data from earlier measurements of
+# the same subplots (but note that this can contain multiple measurements from
+# the same subplot; for a plot that's been measured 4 times, we'll get four
+# different 'records' in this table, three of which will have PREV_PLT_CN. Most
+# or all of these multiples will be filtered out later when we remove plots with
+# insufficient measurements, depending on how many measurements we decide to
+# use.)
 
 nf4 <- nf_trees %>%
   left_join(nf_plots, by = "PLT_CN") %>%
   left_join(nf_conds, by = c("PLT_CN", "CONDID")) %>%
+  filter(DESIGNCD == 1) %>% 
   rename(cn_4 = CN,
          cn_3_from_4 = PREV_TRE_CN,
          plt_cn_4 = PLT_CN,
@@ -281,6 +288,7 @@ nf4 <- nf_trees %>%
 nf3 <- nf_trees %>%
   left_join(nf_plots, by = "PLT_CN") %>%
   left_join(nf_conds, by = c("PLT_CN", "CONDID")) %>%
+  filter(DESIGNCD == 1) %>% 
   filter(PLT_CN %in% nf4$plt_cn_3_from_4) %>% 
   rename(cn_3 = CN,
          cn_2_from_3 = PREV_TRE_CN,
@@ -307,6 +315,7 @@ nf3 <- nf_trees %>%
 nf2 <- nf_trees %>%
   left_join(nf_plots, by = "PLT_CN") %>%
   left_join(nf_conds, by = c("PLT_CN", "CONDID")) %>%
+  filter(DESIGNCD == 1) %>% 
   filter(PLT_CN %in% nf3$plt_cn_2_from_3) %>% 
   rename(cn_2 = CN,
          cn_1_from_2 = PREV_TRE_CN,
@@ -333,6 +342,7 @@ nf2 <- nf_trees %>%
 nf1 <- nf_trees %>%
   left_join(nf_plots, by = "PLT_CN") %>%
   left_join(nf_conds, by = c("PLT_CN", "CONDID")) %>%
+  filter(DESIGNCD == 1) %>% 
   filter(PLT_CN %in% nf2$plt_cn_1_from_2) %>% 
   rename(cn_1 = CN,
          cn_0_from_1 = PREV_TRE_CN,
@@ -359,6 +369,7 @@ nf1 <- nf_trees %>%
 nf0 <- nf_trees %>%
   left_join(nf_plots, by = "PLT_CN") %>%
   left_join(nf_conds, by = c("PLT_CN", "CONDID")) %>%
+  filter(DESIGNCD == 1) %>% 
   filter(PLT_CN %in% nf1$plt_cn_0_from_1) %>% 
   rename(cn_0 = CN,
          plt_cn_0 = PLT_CN,
@@ -381,6 +392,87 @@ nf0 <- nf_trees %>%
   select(-PREV_TRE_CN, -PREV_PLT_CN)
 
 ################################################################################
+# Make index that connects all subplots through time & common subplot id to all
+################################################################################
+nf0$sub0 <- paste0(nf0$plt_cn_0, nf0$subp_0)
+nf1$sub1 <- paste0(nf1$plt_cn_1, nf1$subp_1)
+nf2$sub2 <- paste0(nf2$plt_cn_2, nf2$subp_2)
+nf3$sub3 <- paste0(nf3$plt_cn_3, nf3$subp_3)
+nf4$sub4 <- paste0(nf4$plt_cn_4, nf4$subp_4)
+nf1$sub0from1 <- paste0(nf1$plt_cn_0_from_1, nf1$subp_1)
+nf2$sub1from2 <- paste0(nf2$plt_cn_1_from_2, nf2$subp_2)
+nf3$sub2from3 <- paste0(nf3$plt_cn_2_from_3, nf3$subp_3)
+nf4$sub3from4 <- paste0(nf4$plt_cn_3_from_4, nf4$subp_4)
+
+# have to work from oldest forward to join
+subs <- data.frame(s0 = unique(nf0$sub0))
+subs$s1 <- sapply(subs$s0, function(i){
+  nf1$sub1[which(nf1$sub0from1 == i)][1]
+})
+# but add in newer plots that didn't have previous measurements
+subs <- rbind(subs, data.frame(s0 = NA,
+                               s1 = unique(nf1$sub1[!(nf1$sub1 %in% subs$s1)])))
+subs$s2 <- sapply(subs$s1, function(i){
+  nf2$sub2[which(nf2$sub1from2 == i)][1]
+})
+subs <- rbind(subs, data.frame(s0 = NA,
+                               s1 = NA,
+                               s2 = unique(nf2$sub2[!(nf2$sub2 %in% subs$s2)])))
+subs$s3 <- sapply(subs$s2, function(i){
+  nf3$sub3[which(nf3$sub2from3 == i)][1]
+})
+subs <- rbind(subs, data.frame(s0 = NA,
+                               s1 = NA,
+                               s2 = NA,
+                               s3 = unique(nf3$sub3[!(nf3$sub3 %in% subs$s3)])))
+subs$s4 <- sapply(subs$s3, function(i){
+  nf4$sub4[which(nf4$sub3from4 == i)][1]
+})
+subs <- rbind(subs, data.frame(s0 = NA,
+                               s1 = NA,
+                               s2 = NA, 
+                               s3 = NA,
+                               s4 = unique(nf4$sub4[!(nf4$sub4 %in% subs$s4)])))
+# one unique subplot id that's independent of plot cn & subp
+subs$id <- 1:nrow(subs)
+
+################################################################################
+# Remove entries from later tables that are already in earlier tables
+################################################################################
+nf1 <- nf1[which(!(nf1$cn_1 %in% nf0$cn_0)), ]
+nf2 <- nf2[which(!(nf2$cn_2 %in% nf0$cn_0)), ]
+nf2 <- nf2[which(!(nf2$cn_2 %in% nf1$cn_1)), ]
+nf3 <- nf3[which(!(nf3$cn_3 %in% nf0$cn_0)), ]
+nf3 <- nf3[which(!(nf3$cn_3 %in% nf1$cn_1)), ]
+nf3 <- nf3[which(!(nf3$cn_3 %in% nf2$cn_2)), ]
+nf4 <- nf4[which(!(nf4$cn_4 %in% nf0$cn_0)), ]
+nf4 <- nf4[which(!(nf4$cn_4 %in% nf1$cn_1)), ]
+nf4 <- nf4[which(!(nf4$cn_4 %in% nf2$cn_2)), ]
+nf4 <- nf4[which(!(nf4$cn_4 %in% nf3$cn_3)), ]
+
+################################################################################
+# Make one master, multitemporal table
+################################################################################
+nf <-  # na_matches = "never" keeps it from joining NAs
+  full_join(nf0, nf1, by = c("cn_0" = "cn_0_from_1"), na_matches = "never") %>%
+  full_join(nf2, by = c("cn_1" = "cn_1_from_2"), na_matches = "never") %>%
+  full_join(nf3, by = c("cn_2" = "cn_2_from_3"), na_matches = "never") %>%
+  full_join(nf4, by = c("cn_3" = "cn_3_from_4"), na_matches = "never")
+
+# sub is our unique subplot id
+nf$sub <- NA
+nf$sub[is.na(nf$sub) & !is.na(nf$sub4)] <- 
+  subs$id[match(nf$sub4[is.na(nf$sub) & !is.na(nf$sub4)], subs$s4)]
+nf$sub[is.na(nf$sub) & !is.na(nf$sub3)] <- 
+  subs$id[match(nf$sub3[is.na(nf$sub) & !is.na(nf$sub3)], subs$s3)]
+nf$sub[is.na(nf$sub) & !is.na(nf$sub2)] <- 
+  subs$id[match(nf$sub2[is.na(nf$sub) & !is.na(nf$sub2)], subs$s2)]
+nf$sub[is.na(nf$sub) & !is.na(nf$sub1)] <- 
+  subs$id[match(nf$sub1[is.na(nf$sub) & !is.na(nf$sub1)], subs$s1)]
+nf$sub[is.na(nf$sub) & !is.na(nf$sub0)] <- 
+  subs$id[match(nf$sub0[is.na(nf$sub) & !is.na(nf$sub0)], subs$s0)]
+
+################################################################################
 # Potential Sugarbush Parameters (for next part)
 ################################################################################
 bamin <- 50
@@ -388,94 +480,95 @@ pcthm <- 60
 maxsite <- 5
 ```
 
-Now we can explore data available for the ingrowth model, by starting with the oldest data, filtering out non-sugarbushes, seeing how much data is left, seeing how many plots had some logging, and doing a cursory exploration of ingrowth patterns through time. Based on what we find, we can decide weather to keep the oldest data for the model creation, or discard it and start over with the next oldest. Potential sugarbushes (which we'll keep in the data) need to have at least `r bamin` sqft/ac ba, at least `r pcthm`% of ba in hard maple, and a site class not over `r maxsite` (growing at least 50 cuft/ac/yr; VT class II or better).  
+Now we can explore data available for the ingrowth model, by starting with subplots that have been measured five times, filtering out non-sugarbushes, seeing how much data is left, seeing how many plots had some logging, and doing a cursory exploration of ingrowth patterns through time. Based on what we find, we can decide weather to keep the oldest data for the model creation, or discard it and start over with the next oldest. Potential sugarbushes (which we'll keep in the data) need to have at least `r bamin` sqft/ac ba, at least `r pcthm`% of ba in hard maple, and a site class not over `r maxsite` (growing at least 50 cuft/ac/yr; VT class II or better).  
 
-```{r ingrowth_eda}
+```{r plot_connections}
+# Do all records for each later plot point to the same earlier plot?
+all((nf4 %>% filter(!is.na(plt_cn_3_from_4)) %>% 
+  group_by(plt_cn_4) %>% 
+  summarize(same_pre = length(unique(plt_cn_3_from_4)) == 1))$same_pre)
+
+# Do all records with the same earlier plot point to the same later plot?
+all((nf4 %>% filter(!is.na(plt_cn_3_from_4)) %>% 
+  group_by(plt_cn_3_from_4) %>% 
+  summarize(same_post = length(unique(plt_cn_4)) == 1))$same_post)
+
+# Both should be TRUE.
+```
+
+```{r sugar5}
 ################################################################################
-# Find sugarbush-potential subplots and evaluate logging done
+# Find sugarbush-potential subplots (at start) and evaluate logging done
 ################################################################################
-sugar_plots <- nf0 %>% filter(designcd_0 ==1, # only current plot design
-                              statuscd_0 == 1) %>% # only live
-  mutate(plt = paste0(plt_cn_0, subp_0)) %>% # unique subplot IDs
-  group_by(plt) %>% 
-  summarise(ba = mean(ba1_0), # I verified that this matches sum(ba_ac_0)
-            hm = 100 * sum(ba_ac_0[spp_0 == "hard maple"]) / sum(ba_ac_0), 
-            site = mean(site_class_0)) %>% 
-  filter(ba >= bamin, hm >= pcthm, site <= maxsite)
+sugar_plots <- nf %>%
+  group_by(sub) %>% 
+  summarise(sub = sub[1],
+            ba = mean(ba1_0, na.rm = T),
+            ba2 = sum(ba_ac_0[statuscd_0 == 1], na.rm = T), # to verify data isn't screwed up
+            hm = 100 * sum(ba_ac_0[spp_0 == "hard maple"], na.rm = T) / 
+              sum(ba_ac_0, na.rm = T), 
+            site = mean(site_class_0, na.rm = T)) 
+sugar_plots$ba[is.na(sugar_plots$ba)] <- 0
 
-sugar_plots <- sugar_plots$plt
+# should be TRUE
+all(sugar_plots$ba == sugar_plots$ba2)
 
-nf01 <- nf0 %>% full_join(nf1, by = c("cn_0" = "cn_0_from_1")) %>% 
-  mutate(plt = case_when(!is.na(plt_cn_0) & !is.na(subp_0) ~ 
-                           paste0(plt_cn_0, subp_0),
-                         !is.na(plt_cn_0_from_1) & !is.na(subp_1) ~ 
-                           paste0(plt_cn_0_from_1, subp_1),
-                         TRUE ~ "5")) %>% 
-  filter(statuscd_0 == 1, # don't care about trees that started dead 
-         !is.na(statuscd_1), # newer records missing for live trees T0: bad data or stumps that couldn't be found? I think we just throw them out.
-         plt %in% sugar_plots) %>% 
+# plots w/ 5 measurements
+sub5 <- subs$id[!is.na(subs$s0) & !is.na(subs$s1) & !is.na(subs$s2) & 
+                  !is.na(subs$s3) & !is.na(subs$s3)]
+
+sugar_plots <- sugar_plots %>% 
+  filter(ba >= bamin, hm >= pcthm, site <= maxsite, sub %in% sub5)
+
+sugar_plots <- unique(sugar_plots$sub)
+sugar_plots <- sugar_plots[!is.na(sugar_plots)]
+
+sugar5 <- nf %>% 
+  filter(sub %in% sugar_plots) %>%  
   mutate(cut_01 = if_else(statuscd_0 == 1 & statuscd_1 == 3,
                           TRUE, FALSE), # logging removals
          died_01 = if_else(statuscd_0 == 1 & statuscd_1 == 2,
                            TRUE, FALSE), # natural mort.
-         ingrowth_01 = if_else(is.na(cn_0) & !is.na(cn_1), TRUE, FALSE)) 
-
-################################################################################
-# Link all data to look at ingrowth patterns
-################################################################################
-nf012 <- nf01 %>% full_join(nf2, by = c("cn_1" = "cn_1_from_2")) %>% 
-  mutate(plt = case_when(!is.na(plt) ~ plt,
-                         !is.na(plt_cn_1_from_2) & !is.na(subp_2) ~ 
-                           paste0(plt_cn_1_from_2, subp_2),
-                         TRUE ~ "5")) %>% 
-  filter(plt %in% sugar_plots) %>% 
-  mutate(cut_12 = if_else(statuscd_1 == 1 & statuscd_2 == 3,
+         cut_01 = if_else(is.na(cut_01), FALSE, cut_01),
+         died_01 = if_else(is.na(died_01), FALSE, died_01),
+         ingrowth_01 = if_else(is.na(cn_0) & !is.na(cn_1), TRUE, FALSE),
+         cut_12 = if_else(statuscd_1 == 1 & statuscd_2 == 3,
                           TRUE, FALSE), # logging removals
-         cut12 = if_else(is.na(cut_12), FALSE, cut_12), # otherwise ingrowth gets NA
          died_12 = if_else(statuscd_1 == 1 & statuscd_2 == 2,
                            TRUE, FALSE), # natural mort.
+         cut_12 = if_else(is.na(cut_12), FALSE, cut_12),
          died_12 = if_else(is.na(died_12), FALSE, died_12),
-         ingrowth_12 = if_else(is.na(cn_1) & !is.na(cn_2), TRUE, FALSE))
-
-################################################################################
-nf0123 <- nf012 %>% full_join(nf3, by = c("cn_2" = "cn_2_from_3")) %>% 
-  mutate(plt = case_when(!is.na(plt) ~ plt,
-                         !is.na(plt_cn_2_from_3) & !is.na(subp_3) ~ 
-                           paste0(plt_cn_2_from_3, subp_3),
-                         TRUE ~ "5")) %>% 
-  filter(plt %in% sugar_plots) %>% 
-  mutate(cut_23 = if_else(statuscd_2 == 1 & statuscd_3 == 3,
+         ingrowth_12 = if_else(is.na(cn_1) & !is.na(cn_2), TRUE, FALSE),
+         cut_23 = if_else(statuscd_2 == 1 & statuscd_3 == 3,
                           TRUE, FALSE), # logging removals
          died_23 = if_else(statuscd_2 == 1 & statuscd_3 == 2,
                            TRUE, FALSE), # natural mort.
-         ingrowth_23 = if_else(is.na(cn_2) & !is.na(cn_3), TRUE, FALSE))
-
-################################################################################
-nf01234 <- nf0123 %>% full_join(nf4, by = c("cn_3" = "cn_3_from_4")) %>% 
-  mutate(plt = case_when(!is.na(plt) ~ plt,
-                         !is.na(plt_cn_3_from_4) & !is.na(subp_4) ~ 
-                           paste0(plt_cn_3_from_4, subp_4),
-                         TRUE ~ "5")) %>% 
-  filter(plt %in% sugar_plots) %>% 
-  mutate(cut_34 = if_else(statuscd_3 == 1 & statuscd_4 == 3,
+         cut_23 = if_else(is.na(cut_23), FALSE, cut_23),
+         died_23 = if_else(is.na(died_23), FALSE, died_23),
+         ingrowth_23 = if_else(is.na(cn_2) & !is.na(cn_3), TRUE, FALSE),
+         cut_34 = if_else(statuscd_3 == 1 & statuscd_4 == 3,
                           TRUE, FALSE), # logging removals
          died_34 = if_else(statuscd_3 == 1 & statuscd_4 == 2,
                            TRUE, FALSE), # natural mort.
-         ingrowth_34 = if_else(is.na(cn_3) & !is.na(cn_4), TRUE, FALSE))
-
-# NAs introduced from joins are all FALSE
-nf01234$died_01[is.na(nf01234$died_01)] <- FALSE
-nf01234$died_12[is.na(nf01234$died_12)] <- FALSE
-nf01234$died_23[is.na(nf01234$died_23)] <- FALSE
-nf01234$died_34[is.na(nf01234$died_34)] <- FALSE
-nf01234$cut_01[is.na(nf01234$cut_01)] <- FALSE
-nf01234$cut_12[is.na(nf01234$cut_12)] <- FALSE
-nf01234$cut_23[is.na(nf01234$cut_23)] <- FALSE
-nf01234$cut_34[is.na(nf01234$cut_34)] <- FALSE
-nf01234$ingrowth_01[is.na(nf01234$ingrowth_01)] <- FALSE
-nf01234$ingrowth_12[is.na(nf01234$ingrowth_12)] <- FALSE
-nf01234$ingrowth_23[is.na(nf01234$ingrowth_23)] <- FALSE
-nf01234$ingrowth_34[is.na(nf01234$ingrowth_34)] <- FALSE
+         cut_34 = if_else(is.na(cut_34), FALSE, cut_34),
+         died_34 = if_else(is.na(died_34), FALSE, died_34),
+         ingrowth_34 = if_else(is.na(cn_3) & !is.na(cn_4), TRUE, FALSE)) %>% 
+  select(sub, spp_0, dbh_0, statuscd_0, ba_ac_0, bal1_0, ba1_0, MEASYEAR_0, MEASMON_0, MEASDAY_0,
+         spp_1, dbh_1, statuscd_1, ba_ac_1, bal1_1, ba1_1, MEASYEAR_1, MEASMON_1, MEASDAY_1,
+         spp_2, dbh_2, statuscd_2, ba_ac_2, bal1_2, ba1_2, MEASYEAR_2, MEASMON_2, MEASDAY_2,
+         spp_3, dbh_3, statuscd_3, ba_ac_3, bal1_3, ba1_3, MEASYEAR_3, MEASMON_3, MEASDAY_3,
+         spp_4, dbh_4, statuscd_4, ba_ac_4, bal1_4, ba1_4, MEASYEAR_4, MEASMON_4, MEASDAY_4,
+         cut_01, died_01, ingrowth_01, cut_12, died_12, ingrowth_12, 
+         cut_23, died_23, ingrowth_23, cut_34, died_34, ingrowth_34)
+  
+# newer records missing for live trees T0: bad data or stumps that couldn't be
+# found? I think we just throw them out:
+# sugar5 <- sugar5[!is.na(sugar5$statuscd_1), ]
 ```
 
-There are `r length(unique(nf01$plt))` potential-sugarbush subplots with at least 5 measurements, of which `r sum((nf01 %>% group_by(plt) %>% summarize(cutting = any(cut_01)))$cutting)` had at least some cutting during the first remeasurement period (from measurement 0 to measurement 1).
+There are `r length(sugar_plots)` potential-sugarbush subplots with at least 5 measurements, of which `r sum((sugar5 %>% group_by(sub) %>% summarize(cutting = any(cut_01)))$cutting)` had at least some cutting during the first remeasurement period (from measurement 0 to measurement 1). 
+
+```{r sugar5_ingrowth}
+# plot ingrowth by time in plots w/ & w/o cutting
+```
+

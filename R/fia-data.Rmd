@@ -25,6 +25,7 @@ The Northern Forest region was chosen because it covers a fairly large geographi
 library("dplyr")
 library("lubridate")
 library("english")
+library("ggplot2")
 
 # Define States & counties (FIPS codes) in Northern Forest region --------
 
@@ -505,8 +506,8 @@ sugar_plots <- nf %>%
   summarise(sub = sub[1],
             ba = mean(ba1_0, na.rm = T),
             ba2 = sum(ba_ac_0[statuscd_0 == 1], na.rm = T), # to verify data isn't screwed up
-            hm = 100 * sum(ba_ac_0[spp_0 == "hard maple"], na.rm = T) / 
-              sum(ba_ac_0, na.rm = T), 
+            hm = 100 * sum(ba_ac_0[spp_0 == "hard maple" & statuscd_0 == 1], na.rm = T) / 
+              sum(ba_ac_0[statuscd_0 == 1], na.rm = T), 
             site = mean(site_class_0, na.rm = T)) 
 sugar_plots$ba[is.na(sugar_plots$ba)] <- 0
 
@@ -515,7 +516,7 @@ all(sugar_plots$ba == sugar_plots$ba2)
 
 # plots w/ 5 measurements
 sub5 <- subs$id[!is.na(subs$s0) & !is.na(subs$s1) & !is.na(subs$s2) & 
-                  !is.na(subs$s3) & !is.na(subs$s3)]
+                  !is.na(subs$s3) & !is.na(subs$s4)]
 
 sugar_plots <- sugar_plots %>% 
   filter(ba >= bamin, hm >= pcthm, site <= maxsite, sub %in% sub5)
@@ -566,9 +567,159 @@ sugar5 <- nf %>%
 # sugar5 <- sugar5[!is.na(sugar5$statuscd_1), ]
 ```
 
-There are `r length(sugar_plots)` potential-sugarbush subplots with at least 5 measurements, of which `r sum((sugar5 %>% group_by(sub) %>% summarize(cutting = any(cut_01)))$cutting)` had at least some cutting during the first remeasurement period (from measurement 0 to measurement 1). 
+There are `r length(sugar_plots)` potential-sugarbush subplots with at least 5 measurements, of which `r sum((sugar5 %>% group_by(sub) %>% summarize(cutting = any(cut_01)))$cutting)` had at least some cutting during the first remeasurement period (from measurement 0 to measurement 1). Here is the average ingrowth (stems/subplot) in different remeasurement periods for plots that had some logging in the first period, and plots that had no logging:
 
 ```{r sugar5_ingrowth}
 # plot ingrowth by time in plots w/ & w/o cutting
+sugar5 %>% group_by(sub) %>% 
+  summarize(cutting01 = any(cut_01), in01 = sum(ingrowth_01), 
+            in12 = sum(ingrowth_12), in23 = sum(ingrowth_23),
+            in34 = sum(ingrowth_34)) %>% 
+  group_by(cutting01) %>% 
+  summarize(nplots = n(), ingrowth01 = mean(in01), ingrowth12 = mean(in12), 
+            ingrowth23 = mean(in23), ingrowth34 = mean(in34))
 ```
 
+There's some evidence of increased ingrowth in the remeasurement periods following logging (ingrowth12, ingrowth23, and ingrowth34), but there isn't a lot of data. Definitely not enough to see how ingrowth is affected by different cutting intensities. I'll start over and include plots that have only 4 measurements, to increase the amount of data we have to work with.
+
+```{r sugar4}
+################################################################################
+# Find sugarbush-potential subplots (at start) and evaluate logging done
+################################################################################
+sugar_plots1 <- nf %>%
+  group_by(sub) %>% 
+  summarise(sub = sub[1],
+            ba = mean(ba1_1, na.rm = T),
+            ba2 = sum(ba_ac_1[statuscd_1 == 1], na.rm = T), # to verify data isn't screwed up
+            hm = 100 * sum(ba_ac_1[spp_1 == "hard maple" & statuscd_1 == 1], na.rm = T) / 
+              sum(ba_ac_1[statuscd_1 == 1], na.rm = T), 
+            site = mean(site_class_1, na.rm = T)) 
+sugar_plots1$ba[is.na(sugar_plots1$ba)] <- 0
+
+# should be TRUE
+all(sugar_plots1$ba == sugar_plots1$ba2)
+
+# plots w/ 4 measurements
+sub4meas <- subs$id[!is.na(subs$s1) & !is.na(subs$s2) & !is.na(subs$s3) & 
+                  !is.na(subs$s4)]
+
+sugar_plots1 <- sugar_plots1 %>% 
+  filter(ba >= bamin, hm >= pcthm, site <= maxsite, sub %in% sub4meas)
+
+sugar_plots1 <- unique(sugar_plots1$sub)
+sugar_plots1 <- sugar_plots1[!is.na(sugar_plots1)]
+
+sugar4 <- nf %>% 
+  filter(sub %in% sugar_plots1) %>%  
+  mutate(cut_12 = if_else(statuscd_1 == 1 & statuscd_2 == 3,
+                          TRUE, FALSE), # logging removals
+         died_12 = if_else(statuscd_1 == 1 & statuscd_2 == 2,
+                           TRUE, FALSE), # natural mort.
+         cut_12 = if_else(is.na(cut_12), FALSE, cut_12),
+         died_12 = if_else(is.na(died_12), FALSE, died_12),
+         ingrowth_12 = if_else(is.na(cn_1) & !is.na(cn_2), TRUE, FALSE),
+         cut_23 = if_else(statuscd_2 == 1 & statuscd_3 == 3,
+                          TRUE, FALSE), # logging removals
+         died_23 = if_else(statuscd_2 == 1 & statuscd_3 == 2,
+                           TRUE, FALSE), # natural mort.
+         cut_23 = if_else(is.na(cut_23), FALSE, cut_23),
+         died_23 = if_else(is.na(died_23), FALSE, died_23),
+         ingrowth_23 = if_else(is.na(cn_2) & !is.na(cn_3), TRUE, FALSE),
+         cut_34 = if_else(statuscd_3 == 1 & statuscd_4 == 3,
+                          TRUE, FALSE), # logging removals
+         died_34 = if_else(statuscd_3 == 1 & statuscd_4 == 2,
+                           TRUE, FALSE), # natural mort.
+         cut_34 = if_else(is.na(cut_34), FALSE, cut_34),
+         died_34 = if_else(is.na(died_34), FALSE, died_34),
+         ingrowth_34 = if_else(is.na(cn_3) & !is.na(cn_4), TRUE, FALSE)) %>% 
+  select(sub, 
+         spp_1, dbh_1, statuscd_1, ba_ac_1, bal1_1, ba1_1, MEASYEAR_1, MEASMON_1, MEASDAY_1,
+         spp_2, dbh_2, statuscd_2, ba_ac_2, bal1_2, ba1_2, MEASYEAR_2, MEASMON_2, MEASDAY_2,
+         spp_3, dbh_3, statuscd_3, ba_ac_3, bal1_3, ba1_3, MEASYEAR_3, MEASMON_3, MEASDAY_3,
+         spp_4, dbh_4, statuscd_4, ba_ac_4, bal1_4, ba1_4, MEASYEAR_4, MEASMON_4, MEASDAY_4,
+         cut_12, died_12, ingrowth_12, 
+         cut_23, died_23, ingrowth_23, cut_34, died_34, ingrowth_34)
+```
+
+There are `r length(sugar_plots1)` potential-sugarbush subplots with at least 4 measurements, of which `r sum((sugar4 %>% group_by(sub) %>% summarize(cutting = any(cut_12)))$cutting)` had at least some cutting during the first remeasurement period (from measurement 1 to measurement 2). Here is the average ingrowth (stems/subplot) in different remeasurement periods for plots that had some logging in the first period, and plots that had no logging:
+
+```{r sugar4_ingrowth}
+# ingrowth by time in plots w/ & w/o cutting
+sugar4 %>% group_by(sub) %>% 
+  summarize(cutting12 = any(cut_12), in12 = sum(ingrowth_12), 
+            in23 = sum(ingrowth_23), in34 = sum(ingrowth_34)) %>% 
+  group_by(cutting12) %>% 
+  summarize(nplots = n(), ingrowth12 = mean(in12), 
+            ingrowth23 = mean(in23), ingrowth34 = mean(in34))
+```
+Exploring the effects of logging intensity:
+
+```{r sugar4_inplt1}
+# plot ingrowth vs. pct cut
+sugar4 %>% group_by(sub) %>% 
+  summarize(pctcut = sum(ba_ac_1[cut_12])/
+              sum(ba_ac_1[statuscd_1 == 1], na.rm = T), 
+            ingrowth12 = sum(ingrowth_12), 
+            ingrowth23 = sum(ingrowth_23), ingrowth34 = sum(ingrowth_34)) %>% 
+  ggplot2::ggplot(ggplot2::aes(pctcut, ingrowth23)) +
+  ggplot2::geom_jitter() +
+  ggplot2::geom_smooth(method = "lm") +
+  scale_y_continuous("stems ingrowth/plt ~ 2-7 yr postharvest") +
+  scale_x_continuous("percent of ba harvested")
+
+sugar4 %>% group_by(sub) %>% 
+  summarize(pctcut = sum(ba_ac_1[cut_12])/
+              sum(ba_ac_1[statuscd_1 == 1], na.rm = T), 
+            ingrowth12 = sum(ingrowth_12), 
+            ingrowth23 = sum(ingrowth_23), ingrowth34 = sum(ingrowth_34)) %>% 
+  ggplot2::ggplot(ggplot2::aes(pctcut, ingrowth34)) +
+  ggplot2::geom_jitter() +
+  ggplot2::geom_smooth(method = "lm") +
+  scale_y_continuous("stems ingrowth/plt ~ 7-12 yr postharvest") +
+  scale_x_continuous("percent of ba harvested")
+```
+```{r sugar4_inplt2}
+# plot ingrowth vs. res ba (really only care about res. ba ~30 - 150)
+sugar4 %>% group_by(sub) %>% 
+  summarize(resba = sum(ba_ac_2[statuscd_2 == 1], na.rm = T), 
+            ingrowth12 = sum(ingrowth_12), 
+            ingrowth23 = sum(ingrowth_23), ingrowth34 = sum(ingrowth_34)) %>% 
+  filter(resba > 30, resba < 150) %>% 
+  ggplot2::ggplot(ggplot2::aes(resba, ingrowth23)) +
+  ggplot2::geom_jitter() +
+  ggplot2::geom_smooth(method = "lm") +
+  scale_y_continuous("stems ingrowth/plt ~ 2-7 yr postharvest") +
+  scale_x_continuous("residual BA")
+
+sugar4 %>% group_by(sub) %>% 
+  summarize(resba = sum(ba_ac_2[statuscd_2 == 1], na.rm = T), 
+            ingrowth12 = sum(ingrowth_12), 
+            ingrowth23 = sum(ingrowth_23), ingrowth34 = sum(ingrowth_34)) %>%  
+  filter(resba > 30, resba < 150) %>% 
+  ggplot2::ggplot(ggplot2::aes(resba, ingrowth34)) +
+  ggplot2::geom_jitter() +
+  ggplot2::geom_smooth(method = "lm") +
+  scale_y_continuous("stems ingrowth/plt ~ 7-12 yr postharvest") +
+  scale_x_continuous("residual BA")
+```
+
+Exploring the effects of basal area on ingrowth, irregardless of logging:
+
+```{r sugar4_inplt3}
+temp <- sugar4 %>% group_by(sub) %>% 
+  summarize(ba1 = sum(ba_ac_1[statuscd_1 == 1], na.rm = T),
+            ba2 = sum(ba_ac_2[statuscd_2 == 1], na.rm = T),
+            ba3 = sum(ba_ac_3[statuscd_3 == 1], na.rm = T),
+            ingrowth12 = sum(ingrowth_12), 
+            ingrowth23 = sum(ingrowth_23), ingrowth34 = sum(ingrowth_34)) 
+
+rbind(data.frame(ba = temp$ba1, ingrowth = temp$ingrowth12),
+      data.frame(ba = temp$ba2, ingrowth = temp$ingrowth23),
+      data.frame(ba = temp$ba3, ingrowth = temp$ingrowth34)) %>% 
+  filter(ba > 10, ba < 150) %>%
+  ggplot2::ggplot(ggplot2::aes(ba, ingrowth)) +
+  ggplot2::geom_jitter() +
+  ggplot2::geom_smooth(method = "lm") +
+  scale_y_continuous("stems ingrowth/plt", limits = c(0, 7)) +
+  scale_x_continuous("BA")
+```
